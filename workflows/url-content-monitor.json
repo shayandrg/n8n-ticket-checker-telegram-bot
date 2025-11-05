@@ -1,0 +1,182 @@
+{
+  "name": "URL Content Monitor - Simple",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "cronExpression": "* * * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Every Minute",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "curl -sL -c /tmp/cookies_$$.txt -b /tmp/cookies_$$.txt -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36' 'https://www.tiwall.com/p/kaa' && rm -f /tmp/cookies_$$.txt"
+      },
+      "id": "fetch-url",
+      "name": "Fetch URL",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Get the fetched content from stdout\nconst content = $input.item.json.stdout || '';\nconst targetUrl = 'https://www.tiwall.com/p/kaa';\n\n// Get workflow static data to persist hash\nconst staticData = $getWorkflowStaticData('global');\n\nif (!staticData.lastHashes) {\n  staticData.lastHashes = {};\n}\n\n// Simple hash function\nfunction simpleHash(str) {\n  let hash = 0;\n  for (let i = 0; i < str.length; i++) {\n    const char = str.charCodeAt(i);\n    hash = ((hash << 5) - hash) + char;\n    hash = hash & hash;\n  }\n  return Math.abs(hash).toString(16).padStart(8, '0');\n}\n\n// Generate hash\nconst currentHash = simpleHash(content);\nconst previousHash = staticData.lastHashes[targetUrl];\nconst hasChanged = previousHash && previousHash !== currentHash;\nconst isFirstCheck = !previousHash;\n\n// Update stored hash\nstaticData.lastHashes[targetUrl] = currentHash;\n\n// Return result\nreturn {\n  json: {\n    url: targetUrl,\n    content_length: content.length,\n    current_hash: currentHash,\n    previous_hash: previousHash || 'N/A',\n    has_changed: hasChanged,\n    is_first_check: isFirstCheck,\n    timestamp: new Date().toISOString(),\n    status: hasChanged ? 'CHANGED' : (isFirstCheck ? 'FIRST_CHECK' : 'UNCHANGED')\n  }\n};"
+      },
+      "id": "compare-hash",
+      "name": "Compare Hash",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equal",
+              "value2": "CHANGED"
+            }
+          ]
+        }
+      },
+      "id": "check-if-changed",
+      "name": "Check If Changed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "🔄 <b>CONTENT CHANGED!</b>\n\n📍 URL: {{ $json.url }}\n⏰ Time: {{ $json.timestamp }}\n📊 Content Length: {{ $json.content_length }} chars\n🔍 Hash: <code>{{ $json.current_hash }}</code>\n📝 Previous: <code>{{ $json.previous_hash }}</code>",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "send-changed-notification",
+      "name": "Send Changed Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        200
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-credentials",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "✅ <b>No Changes</b>\n\n📍 URL: {{ $json.url }}\n⏰ Time: {{ $json.timestamp }}\n📊 Content Length: {{ $json.content_length }} chars\n🔍 Hash: <code>{{ $json.current_hash }}</code>",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "send-unchanged-notification",
+      "name": "Send Unchanged Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        400
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-credentials",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every Minute": {
+      "main": [
+        [
+          {
+            "node": "Fetch URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch URL": {
+      "main": [
+        [
+          {
+            "node": "Compare Hash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compare Hash": {
+      "main": [
+        [
+          {
+            "node": "Check If Changed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Changed": {
+      "main": [
+        [
+          {
+            "node": "Send Changed Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Unchanged Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "8",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "url-content-monitor-simple",
+  "tags": []
+}
